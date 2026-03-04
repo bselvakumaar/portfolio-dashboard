@@ -69,6 +69,36 @@ a {
   backdrop-filter: blur(8px);
 }
 
+.header-auth {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.header-input {
+  min-width: 170px;
+  width: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.welcome-pill {
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #9bf7db;
+  border: 1px solid rgba(35, 194, 143, 0.55);
+  background: rgba(35, 194, 143, 0.17);
+}
+
+.header-auth-msg {
+  margin: 0;
+  width: 100%;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .app-title {
   margin: 0;
   font-size: 30px;
@@ -187,6 +217,19 @@ button {
   grid-template-columns: 1.2fr 1fr 1fr auto;
   gap: 10px;
   align-items: end;
+}
+
+.trading-grid {
+  display: grid;
+  grid-template-columns: 1.2fr auto auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+.compact-stats {
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 10px;
 }
 
 .inline-note {
@@ -413,6 +456,10 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .trading-grid {
+    grid-template-columns: 1fr;
+  }
+
   .stats-grid {
     grid-template-columns: repeat(3, 1fr);
   }
@@ -435,5 +482,9 @@ th {
     border: none;
     background: transparent;
     backdrop-filter: none;
+  }
+
+  .header-input {
+    width: 100%;
   }
 }

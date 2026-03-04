@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
+import secrets
 
 from dotenv import load_dotenv
 
@@ -56,6 +57,29 @@ def _load_scoring_weights() -> dict[str, float]:
     merged = default_weights.copy()
     merged.update({k: float(v) for k, v in parsed.items()})
     return merged
+
+
+def _decrypt_fernet_value(encrypted_value: str, encryption_key: str) -> str:
+    try:
+        from cryptography.fernet import Fernet
+    except Exception as exc:
+        raise ValueError("cryptography dependency is required for encrypted secrets") from exc
+    try:
+        cipher = Fernet(encryption_key.encode("utf-8"))
+        return cipher.decrypt(encrypted_value.encode("utf-8")).decode("utf-8")
+    except Exception as exc:
+        raise ValueError("Failed to decrypt TRADING_DATABASE_URL_ENCRYPTED") from exc
+
+
+def _load_trading_database_url() -> str:
+    direct = os.getenv("TRADING_DATABASE_URL", "").strip()
+    if direct:
+        return direct
+    encrypted = os.getenv("TRADING_DATABASE_URL_ENCRYPTED", "").strip()
+    encryption_key = os.getenv("APP_ENCRYPTION_KEY", "").strip()
+    if encrypted and encryption_key:
+        return _decrypt_fernet_value(encrypted, encryption_key)
+    return ""
 
 
 @dataclass
@@ -112,6 +136,18 @@ class Settings:
     google_sheets_range: str = os.getenv("GOOGLE_SHEETS_RANGE", "Scores!A1")
     google_service_account_file: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "")
     google_service_account_json: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+
+    trading_store_file: str = os.getenv("TRADING_STORE_FILE", "app/data/trading_store.json")
+    trading_database_url: str = field(default_factory=_load_trading_database_url)
+    trading_database_schema: str = os.getenv("TRADING_DATABASE_SCHEMA", "stock-dashboard")
+    trading_brokerage_rate: float = _get_float("TRADING_BROKERAGE_RATE", 0.001)
+    trading_sell_charge_rate: float = _get_float("TRADING_SELL_CHARGE_RATE", 0.0015)
+    trading_min_brokerage: float = _get_float("TRADING_MIN_BROKERAGE", 20.0)
+    jwt_secret: str = os.getenv("JWT_SECRET", secrets.token_urlsafe(32))
+    jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
+    jwt_exp_minutes: int = _get_int("JWT_EXP_MINUTES", 720)
+    superadmin_email: str = os.getenv("SUPERADMIN_EMAIL", "admin@steward.local")
+    superadmin_password: str = os.getenv("SUPERADMIN_PASSWORD", "ChangeMeNow#123")
 
 
 class JsonFormatter(logging.Formatter):

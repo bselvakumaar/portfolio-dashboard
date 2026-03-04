@@ -5,6 +5,7 @@ __pycache__/
 *.pyd
 .env
 app/.env
+app/data/
 node_modules/
 client/node_modules/
 client/dist/

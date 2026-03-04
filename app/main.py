@@ -4,11 +4,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from app.analytics import build_dashboard, build_top_picks, enrich_with_predictions
+from app.auth_service import AuthService
 from app.config import get_settings
 from app.dashboard_ui_react import render_dashboard_html
 from app.indicators import DataFetchError, calculate_indicators, fetch_ohlc_data
@@ -17,11 +19,34 @@ from app.portfolio_service import analyze_portfolio
 from app.scoring import compute_steward_score
 from app.sentiment import SentimentEngine
 from app.sheets_service import GoogleSheetsService
+from app.trading_service import TradingService
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 app = FastAPI(title=settings.app_name, version="1.0.0")
 sentiment_engine = SentimentEngine(provider=settings.ai_sentiment_provider)
+trading_service = TradingService(
+    store_file=settings.trading_store_file,
+    database_url=settings.trading_database_url,
+    database_schema=settings.trading_database_schema,
+    data_period=settings.data_period,
+    data_interval=settings.data_interval,
+    retry_attempts=settings.retry_attempts,
+    retry_backoff_seconds=settings.retry_backoff_seconds,
+    brokerage_rate=settings.trading_brokerage_rate,
+    sell_charge_rate=settings.trading_sell_charge_rate,
+    min_brokerage=settings.trading_min_brokerage,
+)
+auth_service = AuthService(
+    database_url=settings.trading_database_url,
+    database_schema=settings.trading_database_schema,
+    jwt_secret=settings.jwt_secret,
+    jwt_algorithm=settings.jwt_algorithm,
+    jwt_exp_minutes=settings.jwt_exp_minutes,
+    superadmin_email=settings.superadmin_email,
+    superadmin_password=settings.superadmin_password,
+)
+security = HTTPBearer(auto_error=False)
 
 
 class RunRequest(BaseModel):
@@ -44,6 +69,57 @@ class PortfolioHolding(BaseModel):
 
 class PortfolioRequest(BaseModel):
     holdings: list[PortfolioHolding]
+
+
+class AuthRegisterRequest(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=8)
+    full_name: str = ""
+
+
+class AuthLoginRequest(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=1)
+
+
+class TradingAccountCreateRequest(BaseModel):
+    initial_funds: float = Field(default=0.0, ge=0.0)
+
+
+class TradingFundRequest(BaseModel):
+    amount: float = Field(gt=0.0)
+
+
+class TradingOrderRequest(BaseModel):
+    ticker: str = Field(min_length=1)
+    quantity: float = Field(gt=0.0)
+    price: float | None = Field(default=None, gt=0.0)
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> dict[str, Any]:
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
+    try:
+        return auth_service.verify_token(credentials.credentials)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
+def require_superadmin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    if user.get("role") != "superadmin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required")
+    return user
+
+
+def require_trade_user(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    if user.get("role") == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superadmin is read-only and cannot edit user trading data",
+        )
+    return user
 
 
 def _build_sheet_rows(results: list[dict[str, Any]]) -> list[list[object]]:
@@ -294,6 +370,112 @@ def portfolio_analyze(request: PortfolioRequest) -> dict[str, Any]:
         "as_of_utc": dashboard_result["as_of_utc"],
         "portfolio": portfolio_result,
     }
+
+
+@app.post("/auth/register")
+def auth_register(request: AuthRegisterRequest) -> dict[str, Any]:
+    try:
+        user = auth_service.register_user(
+            email=request.email,
+            password=request.password,
+            full_name=request.full_name,
+        )
+        return {"user": user}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/auth/login")
+def auth_login(request: AuthLoginRequest) -> dict[str, Any]:
+    try:
+        return auth_service.login(email=request.email, password=request.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@app.get("/auth/me")
+def auth_me(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    return {"user": current_user}
+
+
+@app.post("/trading/account/create")
+def trading_account_create(
+    request: TradingAccountCreateRequest,
+    current_user: dict[str, Any] = Depends(require_trade_user),
+) -> dict[str, Any]:
+    try:
+        return trading_service.create_account(
+            user_id=current_user["email"],
+            initial_funds=request.initial_funds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/trading/account/me")
+def trading_account_me(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    return trading_service.account_snapshot(user_id=current_user["email"])
+
+
+@app.get("/trading/account/{user_id}")
+def trading_account_snapshot(
+    user_id: str,
+    _: dict[str, Any] = Depends(require_superadmin),
+) -> dict[str, Any]:
+    return trading_service.account_snapshot(user_id=user_id.strip().lower())
+
+
+@app.post("/trading/funds/add")
+def trading_funds_add(
+    request: TradingFundRequest,
+    current_user: dict[str, Any] = Depends(require_trade_user),
+) -> dict[str, Any]:
+    try:
+        return trading_service.add_funds(
+            user_id=current_user["email"],
+            amount=request.amount,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/trading/order/buy")
+def trading_order_buy(
+    request: TradingOrderRequest,
+    current_user: dict[str, Any] = Depends(require_trade_user),
+) -> dict[str, Any]:
+    try:
+        return trading_service.buy(
+            user_id=current_user["email"],
+            ticker=request.ticker,
+            quantity=request.quantity,
+            price=request.price,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/trading/order/sell")
+def trading_order_sell(
+    request: TradingOrderRequest,
+    current_user: dict[str, Any] = Depends(require_trade_user),
+) -> dict[str, Any]:
+    try:
+        return trading_service.sell(
+            user_id=current_user["email"],
+            ticker=request.ticker,
+            quantity=request.quantity,
+            price=request.price,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/admin/trading/overview")
+def admin_trading_overview(
+    _: dict[str, Any] = Depends(require_superadmin),
+) -> dict[str, Any]:
+    return trading_service.admin_overview()
 
 
 def _parse_cli_args() -> argparse.Namespace:

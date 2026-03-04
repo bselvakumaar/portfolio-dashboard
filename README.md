@@ -24,6 +24,9 @@ python -m app.main --serve
 ```
 
 ## Endpoints
+- `POST /auth/register`
+- `POST /auth/login`
+- `GET /auth/me`
 - `GET /health`
 - `GET /run`
 - `POST /run`
@@ -33,6 +36,31 @@ python -m app.main --serve
 - `GET /top-picks?top_n=5`
 - `GET /market/snapshot?top_n=10`
 - `POST /portfolio/analyze`
+- `POST /trading/account/create`
+- `GET /trading/account/me`
+- `GET /trading/account/{user_id}` (superadmin read-only)
+- `POST /trading/funds/add`
+- `POST /trading/order/buy`
+- `POST /trading/order/sell`
+- `GET /admin/trading/overview` (superadmin read-only)
+
+## Trading Persistence
+- By default, trading data is stored in local JSON file (`TRADING_STORE_FILE`).
+- To use Supabase Postgres, set `TRADING_DATABASE_URL` and `TRADING_DATABASE_SCHEMA`.
+- For passwords containing `@`, use URL encoding in the DB URL (e.g., `@` -> `%40`) or wrap password in single quotes in URL (supported by app normalization).
+- You can encrypt DB URL at rest in `.env`:
+  - Set `APP_ENCRYPTION_KEY` and `TRADING_DATABASE_URL_ENCRYPTED`
+  - Leave `TRADING_DATABASE_URL` blank
+  - Generate encrypted value with:
+    - `python scripts/encrypt_env_secret.py --value "<postgres_url>"`
+
+## Auth Model
+- `user` role:
+  - Register/login with email+password
+  - Can view and edit only own trading portfolio
+- `superadmin` role:
+  - Read-only global visibility
+  - Cannot add funds, buy, sell, or edit user trading data
 
 ## Dashboard Features
 - Prediction metrics: 21-day return forecast, downside risk, confidence, recommendation
