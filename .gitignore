@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+app/.env
+node_modules/
+client/node_modules/
+client/dist/
+.DS_Store
+Thumbs.db
