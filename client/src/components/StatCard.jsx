@@ -1,7 +1,10 @@
-function StatCard({ label, value, valueClass = '' }) {
+function StatCard({ label, value, valueClass = '', info = '' }) {
   return (
     <article className="stat-card">
-      <p className="stat-label">{label}</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+        <p className="stat-label" style={{ marginBottom: 0 }}>{label}</p>
+        {info && <span className="info-tip" title={info}>ⓘ</span>}
+      </div>
       <p className={`stat-value ${valueClass}`.trim()}>{value}</p>
     </article>
   )

@@ -4,7 +4,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
+  ComposedChart,
+  Legend as RechartsLegend,
   Line,
   LineChart,
   Pie,
@@ -32,7 +33,7 @@ const recColors = {
   avoid: '#ff7d7d',
 }
 
-function DashboardPage() {
+function DashboardPage({ user }) {
   const [tickers, setTickers] = useState(defaultTickers.join(','))
   const [topN, setTopN] = useState(5)
   const [capital, setCapital] = useState(1000000)
@@ -61,8 +62,10 @@ function DashboardPage() {
   }
 
   useEffect(() => {
-    runDashboard()
-  }, [])
+    if (user && !data) {
+      runDashboard()
+    }
+  }, [user, data])
 
   const overview = data?.market_overview || {}
   const topPicks = data?.top_picks || []
@@ -103,77 +106,180 @@ function DashboardPage() {
     return Object.entries(counts).map(([name, value]) => ({ name: name.toUpperCase(), key: name, value }))
   }, [topPicks])
 
+  if (!user) {
+    return (
+      <div className="page-stack">
+        <section className="panel" style={{ minHeight: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="lock-icon" style={{ fontSize: '48px', marginBottom: '24px' }}>🔒</div>
+          <h2 className="panel-title" style={{ marginBottom: '12px' }}>Institutional Research Locked</h2>
+          <p className="muted" style={{ maxWidth: '400px', textAlign: 'center', marginBottom: '32px' }}>
+            Detailed quantitative analysis and alpha signals are restricted to verified accounts.
+            Please login to access live research and prediction models.
+          </p>
+          <div className="stats-grid" style={{ opacity: 0.3, filter: 'blur(4px)', pointerEvents: 'none', width: '100%' }}>
+            <StatCard label="Total Coverage" value="--" />
+            <StatCard label="Verified Tickers" value="--" />
+            <StatCard label="Quant Score" value="--" />
+          </div>
+        </section>
+      </div>
+    )
+  }
+
   return (
     <div className="page-stack">
       <section className="panel">
-        <h2 className="panel-title">Dashboard Controls</h2>
+        <h2 className="panel-title">System Configuration</h2>
         <div className="controls-grid">
           <label>
-            Tickers
-            <input value={tickers} onChange={(event) => setTickers(event.target.value)} />
+            Market Tickers
+            <input
+              value={tickers}
+              onChange={(event) => setTickers(event.target.value)}
+              placeholder="RELIANCE.NS, TCS.NS..."
+            />
           </label>
           <label>
-            Top Picks
-            <input type="number" min="1" max="20" value={topN} onChange={(event) => setTopN(event.target.value)} />
+            Target Picks
+            <input
+              type="number"
+              min="1"
+              max="20"
+              value={topN}
+              onChange={(event) => setTopN(event.target.value)}
+            />
           </label>
           <label>
-            Capital (INR)
-            <input type="number" min="1" value={capital} onChange={(event) => setCapital(event.target.value)} />
+            AUM Capital (INR)
+            <input
+              type="number"
+              min="1"
+              value={capital}
+              onChange={(event) => setCapital(event.target.value)}
+            />
           </label>
           <button type="button" onClick={runDashboard}>
-            Run Dashboard
+            Execute Research
           </button>
         </div>
         <StatusBanner text={status} tone={statusTone} />
       </section>
 
-      <section className="stats-grid">
-        <StatCard label="Coverage" value={overview.coverage_tickers ?? '-'} />
-        <StatCard label="Valid Tickers" value={overview.valid_tickers ?? '-'} />
-        <StatCard label="Average Score" value={overview.average_steward_score ?? '-'} />
-        <StatCard label="Average Pred 21D" value={`${overview.average_predicted_return_21d_pct ?? '-'}%`} />
-        <StatCard label="Expected PnL 21D" value={asMoney(syntheticSummary.expected_pnl_21d || 0)} />
-        <StatCard label="Diversification" value={syntheticSummary.diversification_index ?? '-'} />
-      </section>
+      <div className="stats-grid">
+        <StatCard label="Total Coverage" value={overview.coverage_tickers ?? '--'} />
+        <StatCard label="Verified Tickers" value={overview.valid_tickers ?? '--'} />
+        <StatCard label="Quant Score" value={overview.average_steward_score ?? '0.00'} />
+        <StatCard label="Pred Action (21D)" value={`${overview.average_predicted_return_21d_pct ?? '0'}%`} />
+        <StatCard label="Expected PnL" value={asMoney(syntheticSummary.expected_pnl_21d || 0)} />
+        <StatCard label="Diversification" value={syntheticSummary.diversification_index ?? '0.00'} />
+      </div>
 
-      <section className="panel">
-        <h3 className="panel-title">Top Picks</h3>
+      <section>
+        <h3 className="section-title">Institutional Alpha Picks</h3>
         <div className="pick-grid">
-          {topPicks.length === 0 ? <p className="muted">No top picks yet.</p> : topPicks.map((pick) => <TopPickCard key={pick.ticker} pick={pick} />)}
+          {topPicks.length === 0 ? (
+            <div className="panel"><p className="muted">Pending alpha signals...</p></div>
+          ) : (
+            topPicks.map((pick) => <TopPickCard key={pick.ticker} pick={pick} />)
+          )}
         </div>
       </section>
 
       <section className="chart-grid">
         <article className="panel chart-panel">
-          <h3 className="panel-title">Top Picks Return vs Confidence</h3>
+          <h3 className="panel-title">Market Dynamics</h3>
           <div className="chart-wrap">
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={picksChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(154,178,194,0.18)" />
-                <XAxis dataKey="ticker" stroke="#9ab2c2" />
-                <YAxis yAxisId="left" stroke="#9ab2c2" />
-                <YAxis yAxisId="right" orientation="right" stroke="#9ab2c2" />
-                <Tooltip />
-                <Legend />
-                <Bar yAxisId="left" dataKey="ret21d" name="Pred 21D %" fill="#36a9cd" radius={[6, 6, 0, 0]} />
-                <Line yAxisId="right" type="monotone" dataKey="confidence" name="Confidence" stroke="#23c28f" strokeWidth={2} />
-              </LineChart>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={picksChartData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--accent)" stopOpacity={1} />
+                    <stop offset="100%" stopColor="var(--accent-glow)" stopOpacity={0.8} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis
+                  dataKey="ticker"
+                  stroke="var(--text-muted)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  dy={10}
+                />
+                <YAxis
+                  yAxisId="left"
+                  stroke="var(--text-muted)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  stroke="var(--text-muted)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'var(--bg-surface)',
+                    borderColor: 'var(--border-subtle)',
+                    borderRadius: '8px',
+                    boxShadow: 'var(--shadow-lg)'
+                  }}
+                  itemStyle={{ color: 'var(--text-primary)' }}
+                />
+                <RechartsLegend iconType="circle" />
+                <Bar
+                  yAxisId="left"
+                  dataKey="ret21d"
+                  name="Pred 21D %"
+                  fill="url(#barGradient)"
+                  radius={[4, 4, 0, 0]}
+                  barSize={32}
+                />
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="confidence"
+                  name="Confidence"
+                  stroke="var(--success)"
+                  strokeWidth={3}
+                  dot={{ r: 4, fill: 'var(--success)', strokeWidth: 2, stroke: 'var(--bg-surface)' }}
+                  activeDot={{ r: 6 }}
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         </article>
 
         <article className="panel chart-panel">
-          <h3 className="panel-title">Recommendation Mix</h3>
+          <h3 className="panel-title">Recommendation Analysis</h3>
           <div className="chart-wrap">
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height={320}>
               <PieChart>
-                <Pie data={recMixData} dataKey="value" nameKey="name" outerRadius={95} label>
+                <Pie
+                  data={recMixData}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius={60}
+                  outerRadius={100}
+                  paddingAngle={5}
+                  stroke="none"
+                >
                   {recMixData.map((entry) => (
-                    <Cell key={entry.name} fill={recColors[entry.key] || '#9ab2c2'} />
+                    <Cell key={entry.name} fill={recColors[entry.key] || 'var(--text-muted)'} />
                   ))}
                 </Pie>
-                <Tooltip />
-                <Legend />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'var(--bg-surface)',
+                    borderColor: 'var(--border-subtle)',
+                    borderRadius: '8px'
+                  }}
+                />
+                <RechartsLegend verticalAlign="bottom" iconType="circle" />
               </PieChart>
             </ResponsiveContainer>
           </div>
